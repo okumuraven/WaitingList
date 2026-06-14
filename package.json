@@ -1,0 +1,13 @@
+{
+  "name": "comrademarket-waitinglist",
+  "version": "1.0.0",
+  "description": "Professional waiting list for ComradeMarket Kenya",
+  "scripts": {
+    "start:backend": "cd backend && node index.js",
+    "start:frontend": "cd frontend && npm run dev",
+    "build:frontend": "cd frontend && npm run build",
+    "production": "NODE_ENV=production cd backend && node index.js"
+  },
+  "author": "",
+  "license": "ISC"
+}

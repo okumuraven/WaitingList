@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-red: #E53E3E;
+  --color-brand-black: #121212;
+  --color-brand-dark: #1A1A1A;
+  --color-brand-grey: #2D3748;
+  
+  --font-sans: "Inter", "system-ui", "sans-serif";
+  --font-display: "Inter", "system-ui", "sans-serif";
+}
+
+:root {
+  --color-primary: #E53E3E;
+  --color-bg: #121212;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--color-bg);
+  color: #FFFFFF;
+}
+
+@layer base {
+  input[type="email"] {
+    @apply focus:ring-2 focus:ring-brand-red focus:border-transparent outline-none transition-all;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #1A1A1A;
+}
+::-webkit-scrollbar-thumb {
+  background: #E53E3E;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C53030;
+}
