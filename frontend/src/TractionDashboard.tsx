@@ -1,8 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Users, TrendingUp, GraduationCap, Clock, Flame, ArrowRight, ShieldCheck, Globe, ShoppingCart, Store, Bike, ChefHat, Key, UserCog, PieChart } from 'lucide-react';
+import { 
+  Users, TrendingUp, GraduationCap, Clock, Flame, 
+  ArrowRight, ShieldCheck, Globe, ShoppingCart, 
+  Store, Bike, ChefHat, Key, UserCog, PieChart 
+} from 'lucide-react';
 
-const ROLE_ICONS = {
+interface Metrics {
+  total: number;
+  last24h: number;
+  topUniversities: Array<{ domain: string; count: number }>;
+  recentSignups: Array<{ maskedEmail: string; time: string; userType: string }>;
+  segments: Record<string, number>;
+}
+
+const ROLE_ICONS: Record<string, any> = {
   'Buyer': ShoppingCart,
   'Seller': Store,
   'Courier': Bike,
@@ -11,7 +23,7 @@ const ROLE_ICONS = {
   'Admin': UserCog
 };
 
-const StatCard = ({ icon: Icon, label, value, subtext }) => (
+const StatCard = ({ icon: Icon, label, value, subtext }: { icon: any; label: string; value: string | number; subtext: string }) => (
   <div className="bg-white/5 border border-white/10 rounded-3xl p-6 sm:p-8 backdrop-blur-xl">
     <div className="w-12 h-12 bg-brand-red/10 rounded-xl flex items-center justify-center mb-6">
       <Icon className="w-6 h-6 text-brand-red" />
@@ -23,12 +35,13 @@ const StatCard = ({ icon: Icon, label, value, subtext }) => (
 );
 
 export default function TractionDashboard() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState<Metrics | null>(null);
 
   useEffect(() => {
     fetch('http://localhost:5000/api/admin/metrics')
       .then(res => res.json())
-      .then(setData);
+      .then(setData)
+      .catch(err => console.error("Failed to fetch metrics:", err));
   }, []);
 
   if (!data) return (
@@ -47,8 +60,8 @@ export default function TractionDashboard() {
               <Flame className="w-6 h-6 sm:w-8 sm:h-8 text-white fill-white" />
             </div>
             <div className="text-left">
-              <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tighter italic">Traction<span className="text-brand-red">Report</span></h1>
-              <p className="text-slate-500 text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em]">ComradeMarket Kenya Internal Data</p>
+              <h1 className="text-2xl sm:text-3xl font-black uppercase tracking-tighter italic text-left">Traction<span className="text-brand-red">Report</span></h1>
+              <p className="text-slate-500 text-[8px] sm:text-[10px] font-black uppercase tracking-[0.3em] text-left">ComradeMarket Kenya Internal Data</p>
             </div>
           </div>
           <div className="w-full md:w-auto px-4 sm:px-6 py-2 sm:py-3 bg-brand-red/10 border border-brand-red/20 rounded-xl sm:rounded-2xl flex items-center justify-center md:justify-start gap-3 text-left">
@@ -86,7 +99,7 @@ export default function TractionDashboard() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-          {/* Market Segmentation (THE BIG INVESTOR WIN) */}
+          {/* Market Segmentation */}
           <div className="lg:col-span-2 bg-white/5 border border-white/10 rounded-[2rem] sm:rounded-[2.5rem] p-6 sm:p-10 text-left">
             <div className="flex justify-between items-center mb-10">
               <h2 className="text-lg sm:text-xl font-black uppercase tracking-tighter italic">Market <span className="text-brand-red">Segmentation</span></h2>
@@ -95,7 +108,7 @@ export default function TractionDashboard() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-6">
               {data.segments && Object.entries(data.segments).map(([role, count], i) => {
                 const Icon = ROLE_ICONS[role] || Users;
-                const percentage = Math.round(((count as number) / data.total) * 100);
+                const percentage = data.total > 0 ? Math.round((count / data.total) * 100) : 0;
                 return (
                   <motion.div 
                     key={role}
@@ -105,7 +118,7 @@ export default function TractionDashboard() {
                     className="p-6 bg-brand-dark/50 border border-white/5 rounded-3xl relative overflow-hidden"
                   >
                     <Icon className="w-8 h-8 text-brand-red/40 mb-4" />
-                    <div className="text-2xl font-black mb-1">{count as number}</div>
+                    <div className="text-2xl font-black mb-1">{count}</div>
                     <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">{role}s</div>
                     <div className="flex items-center gap-2">
                        <div className="h-1 flex-1 bg-white/5 rounded-full overflow-hidden">
@@ -132,7 +145,7 @@ export default function TractionDashboard() {
               {data.topUniversities.map((uni, i) => (
                 <div key={i} className="group">
                   <div className="flex justify-between items-end mb-2">
-                    <span className="text-sm font-black uppercase tracking-tight text-white group-hover:text-brand-red transition-colors">
+                    <span className="text-sm font-black uppercase tracking-tight text-white group-hover:text-brand-red transition-colors text-left">
                       {uni.domain.split('.')[0]}
                     </span>
                     <span className="text-slate-500 font-black tracking-widest text-[10px]">
@@ -142,7 +155,7 @@ export default function TractionDashboard() {
                   <div className="h-2 bg-white/5 rounded-full overflow-hidden border border-white/5">
                     <motion.div 
                       initial={{ width: 0 }}
-                      animate={{ width: `${(uni.count / data.total) * 100}%` }}
+                      animate={{ width: data.total > 0 ? `${(uni.count / data.total) * 100}%` : '0%' }}
                       transition={{ delay: i * 0.1, duration: 1 }}
                       className="h-full bg-brand-red" 
                     />
@@ -171,7 +184,7 @@ export default function TractionDashboard() {
                      </div>
                      <div className="flex flex-col min-w-0">
                         <span className="text-[10px] font-bold text-white uppercase tracking-wider truncate">{signup.maskedEmail}</span>
-                        <span className="text-[8px] text-brand-red font-black uppercase tracking-widest">Joined as {signup.userType}</span>
+                        <span className="text-[8px] text-brand-red font-black uppercase tracking-widest truncate text-left">Joined as {signup.userType}</span>
                      </div>
                   </div>
                 );
