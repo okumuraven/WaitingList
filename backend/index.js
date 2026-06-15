@@ -29,15 +29,15 @@ app.use(bodyParser.json());
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // use STARTTLS
+  port: 465, // Use Port 465 for SSL (often more reliable on Render)
+  secure: true, 
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 10000,
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 15000,
 });
 
 // Verify connection configuration
@@ -121,12 +121,17 @@ const sendWelcomeEmail = async (userEmail) => {
 // PostgreSQL Database Setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
+  ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 15000,
 });
 
 const initDb = async () => {
+  // Add a small delay to allow Render network to stabilize
+  await new Promise(resolve => setTimeout(resolve, 5000));
   try {
-    await pool.query(`
+    const client = await pool.connect();
+    console.log('Successfully connected to PostgreSQL.');
+    await client.query(`
       CREATE TABLE IF NOT EXISTS waitlist (
         id SERIAL PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
@@ -134,7 +139,8 @@ const initDb = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    console.log('Connected to PostgreSQL and verified schema.');
+    client.release();
+    console.log('Schema verified.');
   } catch (err) {
     console.error('Database initialization error:', err.message);
   }
