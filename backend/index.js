@@ -165,14 +165,10 @@ app.get('/api/admin/metrics', async (req, res) => {
   }
 });
 
-// Serve frontend in production
-if (process.env.NODE_ENV === 'production') {
-  const frontendPath = path.join(__dirname, '../frontend/dist');
-  app.use(express.static(frontendPath));
-  app.use((req, res) => {
-    res.sendFile(path.join(frontendPath, 'index.html'));
-  });
-}
+// Root Route
+app.get('/', (req, res) => {
+  res.send('ComradeMarket Backend API is running.');
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
