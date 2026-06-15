@@ -4,6 +4,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
 const nodemailer = require('nodemailer');
+const { parse } = require('pg-connection-string');
 require('dotenv').config();
 
 const app = express();
@@ -35,28 +36,25 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-  // Force IPv4 to avoid ENETUNREACH on Render
-  family: 4,
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 15000,
+  // FORCE IPv4 for Render stability
+  family: 4, 
+  connectionTimeout: 20000,
+  greetingTimeout: 20000,
+  socketTimeout: 20000,
 });
 
 // Verify connection configuration
 transporter.verify(function (error, success) {
   if (error) {
-    console.error('SMTP Connection Error:', error.message);
+    console.error('SMTP Error (Check EMAIL_USER/PASS):', error.message);
   } else {
-    console.log('SMTP Server is ready to take our messages');
+    console.log('SMTP Server is ready.');
   }
 });
 
 const sendWelcomeEmail = async (userEmail) => {
   const mailOptions = {
-    from: {
-      name: 'ComradeMarket Kenya',
-      address: (process.env.EMAIL_USER || '').trim()
-    },
+    from: `"ComradeMarket Kenya" <${(process.env.EMAIL_USER || '').trim()}>`,
     to: userEmail.trim(),
     subject: 'You\'re In! Welcome to the New Student Economy 🇰🇪',
     text: `You're In! Welcome to ComradeMarket Kenya!\n\nYou've just secured your spot on the waitlist for Kenya's most advanced student ecosystem. We're building the infrastructure for your hustle.\n\nUpcoming Features:\n- Elite Student Stores\n- Uber-Style Bidding\n- Verified Stays\n- Regional Leadership\n\nWe'll notify you as soon as we drop in your region.\n\n© 2026 The Comrade Market Bureau`,
@@ -69,13 +67,10 @@ const sendWelcomeEmail = async (userEmail) => {
           <h1 style="color: #E53E3E; font-size: 28px; font-weight: 900; text-transform: uppercase; letter-spacing: -1px; margin: 0;">Comrade<span style="color: #ffffff;">Market</span></h1>
           <p style="font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 4px; color: #4a4a4a; margin-top: 8px;">The Student Standard</p>
         </div>
-        
         <h2 style="font-size: 26px; font-weight: 900; text-transform: uppercase; font-style: italic; margin-bottom: 24px; line-height: 1.1;">Welcome to the <span style="color: #E53E3E;">Movement.</span></h2>
-        
         <p style="color: #a0a0a0; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">
           You've just secured your spot on the waitlist for Kenya's most advanced student ecosystem. We're building more than just a marketplace—we're building the infrastructure for your hustle.
         </p>
-        
         <div style="background-color: #141414; padding: 30px; border-radius: 24px; margin-bottom: 35px; border: 1px solid #262626;">
           <h3 style="color: #ffffff; font-size: 12px; font-weight: 900; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 20px; color: #E53E3E;">Upcoming Features:</h3>
           <div style="margin-bottom: 15px;">
@@ -95,11 +90,9 @@ const sendWelcomeEmail = async (userEmail) => {
             <p style="color: #808080; font-size: 13px; margin: 4px 0 0 24px;">Lead and moderate the economy in your campus.</p>
           </div>
         </div>
-        
         <p style="color: #a0a0a0; font-size: 15px; line-height: 1.6; margin-bottom: 40px; text-align: center;">
           We'll notify you as soon as we drop in your region. <br/><strong>Get ready to own your hustle.</strong>
         </p>
-        
         <div style="text-align: center; border-top: 1px solid #1a1a1a; padding-top: 30px;">
           <p style="font-size: 11px; color: #404040; margin: 0; text-transform: uppercase; letter-spacing: 1px;">&copy; 2026 The Comrade Market Bureau</p>
           <p style="font-size: 9px; color: #E53E3E; font-weight: 900; text-transform: uppercase; margin-top: 8px; letter-spacing: 2px;">Nairobi, Kenya</p>
@@ -114,25 +107,36 @@ const sendWelcomeEmail = async (userEmail) => {
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log(`SUCCESS: Email sent to ${userEmail}. MessageID: ${info.messageId}`);
+    console.log(`SUCCESS: Email sent to ${userEmail}`);
   } catch (error) {
-    console.error('CRITICAL EMAIL FAILURE:', error);
+    console.error('EMAIL FAILURE:', error.message);
   }
 };
 
 // PostgreSQL Database Setup
-const { parse } = require('pg-connection-string');
-
 let poolConfig = {};
 
 if (process.env.DATABASE_URL) {
-  const config = parse(process.env.DATABASE_URL.trim());
+  let url = process.env.DATABASE_URL.trim();
   
-  // MASKED LOGGING FOR DEBUGGING
-  console.log(`Attempting connection to: ${config.host}:${config.port}`);
-  console.log(`User: ${config.user}`);
-  console.log(`Database: ${config.database}`);
+  // EXPERT AUTO-FIX: If this is a failing Supabase Direct URL, convert it to the Pooler URL automatically.
+  if (url.includes('supabase.co') && !url.includes('pooler.supabase.com')) {
+    console.log('Detecting Supabase Direct URL... Applying Auto-Fix for Render.');
+    try {
+      const projectRef = url.split('@db.')[1].split('.supabase.co')[0];
+      // Convert host to pooler host and port to 6543
+      url = url.replace(/db\..*\.supabase\.co:5432/, 'aws-0-us-west-2.pooler.supabase.com:6543');
+      // Inject project ref into username if missing
+      if (!url.includes(`postgres.${projectRef}`)) {
+        url = url.replace('postgres:', `postgres.${projectRef}:`);
+      }
+      console.log('URL Auto-Fixed to use Shared Pooler (Port 6543).');
+    } catch (e) {
+      console.error('Auto-Fix failed, using raw URL.');
+    }
+  }
 
+  const config = parse(url);
   poolConfig = {
     user: config.user,
     password: config.password,
@@ -141,10 +145,9 @@ if (process.env.DATABASE_URL) {
     database: config.database,
     ssl: {
       rejectUnauthorized: false,
-      servername: config.host // MANDATORY for SNI on Shared Pooler
+      servername: config.host 
     },
-    connectionTimeoutMillis: 15000,
-    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 20000,
     max: 10
   };
 }
@@ -152,8 +155,7 @@ if (process.env.DATABASE_URL) {
 const pool = new Pool(poolConfig);
 
 const initDb = async () => {
-  // Add a small delay to allow Render network to stabilize
-  console.log('Waiting 5s for network stability...');
+  console.log('Initializing Database...');
   await new Promise(resolve => setTimeout(resolve, 5000));
   
   try {
@@ -170,10 +172,7 @@ const initDb = async () => {
     client.release();
     console.log('Schema verified.');
   } catch (err) {
-    console.error('Database initialization error:', err.message);
-    if (err.message.includes('ENOIDENTIFIER')) {
-      console.log('FIX: Ensure your DATABASE_URL uses the SHARED POOLER (port 6543) and the username is postgres.ldhusuwatonwlvgcgcem');
-    }
+    console.error('Database Error:', err.message);
   }
 };
 
@@ -227,25 +226,20 @@ app.get('/api/admin/metrics', async (req, res) => {
     };
 
     const queries = [
-      // Total signups
       pool.query("SELECT COUNT(*) as count FROM waitlist").then(res => {
         stats.total = parseInt(res.rows[0].count);
       }),
-      // User Segments breakdown
       pool.query("SELECT user_type, COUNT(*) as count FROM waitlist GROUP BY user_type").then(res => {
         res.rows.forEach(r => {
           stats.segments[r.user_type] = parseInt(r.count);
         });
       }),
-      // Last 24 hours
       pool.query("SELECT COUNT(*) as count FROM waitlist WHERE created_at >= NOW() - INTERVAL '1 day'").then(res => {
         stats.last24h = parseInt(res.rows[0].count);
       }),
-      // Domain breakdown (Universities)
       pool.query("SELECT SPLIT_PART(email, '@', 2) as domain, COUNT(*) as count FROM waitlist GROUP BY domain ORDER BY count DESC LIMIT 5").then(res => {
         stats.topUniversities = res.rows.map(r => ({ ...r, count: parseInt(r.count) }));
       }),
-      // Recent activity
       pool.query("SELECT email, created_at, user_type FROM waitlist ORDER BY created_at DESC LIMIT 5").then(res => {
         stats.recentSignups = res.rows.map(r => ({
           maskedEmail: r.email.split('@')[0].substring(0, 3) + '***@' + r.email.split('@')[1],
@@ -263,12 +257,10 @@ app.get('/api/admin/metrics', async (req, res) => {
   }
 });
 
-// Serve frontend in production (Placed after API routes)
+// Serve frontend in production
 if (process.env.NODE_ENV === 'production') {
   const frontendPath = path.join(__dirname, '../frontend/dist');
   app.use(express.static(frontendPath));
-  
-  // Robust catch-all for SPA: handles any unmatched GET requests by serving index.html
   app.use((req, res) => {
     res.sendFile(path.join(frontendPath, 'index.html'));
   });
