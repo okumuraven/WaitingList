@@ -1,5 +1,5 @@
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const path = require('path');
@@ -10,7 +10,20 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+const allowedOrigins = [
+  'http://localhost:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
 app.use(bodyParser.json());
 
 // Email Transporter Setup
@@ -22,7 +35,7 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
-  connectionTimeout: 10000, // 10 seconds
+  connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 10000,
 });
@@ -40,7 +53,7 @@ const sendWelcomeEmail = async (userEmail) => {
   const mailOptions = {
     from: {
       name: 'ComradeMarket Kenya',
-      address: process.env.EMAIL_USER.trim()
+      address: (process.env.EMAIL_USER || '').trim()
     },
     to: userEmail.trim(),
     subject: 'You\'re In! Welcome to the New Student Economy 🇰🇪',
@@ -92,7 +105,7 @@ const sendWelcomeEmail = async (userEmail) => {
       </div>
     `,
     headers: {
-      'List-Unsubscribe': `<mailto:${process.env.EMAIL_USER.trim()}?subject=unsubscribe>`,
+      'List-Unsubscribe': `<mailto:${(process.env.EMAIL_USER || '').trim()}?subject=unsubscribe>`,
       'X-Entity-Ref-ID': Date.now().toString()
     }
   };
@@ -105,50 +118,59 @@ const sendWelcomeEmail = async (userEmail) => {
   }
 };
 
-// SQLite Database Setup
-const dbPath = path.resolve(__dirname, 'waitlist.db');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error connecting to database:', err.message);
-  } else {
-    console.log('Connected to the SQLite database.');
-    db.run(`CREATE TABLE IF NOT EXISTS waitlist (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      email TEXT UNIQUE NOT NULL,
-      user_type TEXT DEFAULT 'Buyer',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-  }
+// PostgreSQL Database Setup
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false
 });
 
+const initDb = async () => {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS waitlist (
+        id SERIAL PRIMARY KEY,
+        email TEXT UNIQUE NOT NULL,
+        user_type TEXT DEFAULT 'Buyer',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Connected to PostgreSQL and verified schema.');
+  } catch (err) {
+    console.error('Database initialization error:', err.message);
+  }
+};
+
+initDb();
+
 // API Routes
-app.post('/api/join', (req, res) => {
+app.post('/api/join', async (req, res) => {
   const { email, userType } = req.body;
 
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Valid email is required.' });
   }
 
-  const query = `INSERT INTO waitlist (email, user_type) VALUES (?, ?)`;
-  db.run(query, [email, userType || 'Buyer'], async function(err) {
-    if (err) {
-      if (err.message.includes('UNIQUE constraint failed')) {
-        return res.status(200).json({ 
-          message: 'You are already on the waiting list! Stay tuned.',
-          alreadyExists: true 
-        });
-      }
-      return res.status(500).json({ error: 'Internal server error.' });
-    }
+  const query = `INSERT INTO waitlist (email, user_type) VALUES ($1, $2) RETURNING id`;
+  try {
+    const result = await pool.query(query, [email, userType || 'Buyer']);
     
     // Send Welcome Email asynchronously
     sendWelcomeEmail(email);
 
     res.status(201).json({ 
       message: 'Successfully joined the waiting list! Check your inbox.',
-      id: this.lastID 
+      id: result.rows[0].id 
     });
-  });
+  } catch (err) {
+    if (err.code === '23505') { // PostgreSQL Unique Violation
+      return res.status(200).json({ 
+        message: 'You are already on the waiting list! Stay tuned.',
+        alreadyExists: true 
+      });
+    }
+    console.error('Insert error:', err);
+    return res.status(500).json({ error: 'Internal server error.' });
+  }
 });
 
 // For health checks
@@ -156,7 +178,7 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-// Serve frontend in production (optional for now, but good to have)
+// Serve frontend in production
 if (process.env.NODE_ENV === 'production') {
   app.use(express.static(path.join(__dirname, '../frontend/dist')));
   app.get('*', (req, res) => {
@@ -164,63 +186,52 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-// Administrative Metrics API (For Investor Pitching)
-app.get('/api/admin/metrics', (req, res) => {
-  const stats = {
-    total: 0,
-    last24h: 0,
-    topUniversities: [],
-    recentSignups: [],
-    segments: {}
-  };
+// Administrative Metrics API
+app.get('/api/admin/metrics', async (req, res) => {
+  try {
+    const stats = {
+      total: 0,
+      last24h: 0,
+      topUniversities: [],
+      recentSignups: [],
+      segments: {}
+    };
 
-  const queries = [
-    // Total signups
-    new Promise((resolve) => {
-      db.get("SELECT COUNT(*) as count FROM waitlist", (err, row) => {
-        stats.total = row ? row.count : 0;
-        resolve();
-      });
-    }),
-    // User Segments breakdown
-    new Promise((resolve) => {
-      db.all("SELECT user_type, COUNT(*) as count FROM waitlist GROUP BY user_type", (err, rows) => {
-        (rows || []).forEach(r => {
-          stats.segments[r.user_type] = r.count;
+    const queries = [
+      // Total signups
+      pool.query("SELECT COUNT(*) as count FROM waitlist").then(res => {
+        stats.total = parseInt(res.rows[0].count);
+      }),
+      // User Segments breakdown
+      pool.query("SELECT user_type, COUNT(*) as count FROM waitlist GROUP BY user_type").then(res => {
+        res.rows.forEach(r => {
+          stats.segments[r.user_type] = parseInt(r.count);
         });
-        resolve();
-      });
-    }),
-    // Last 24 hours
-    new Promise((resolve) => {
-      db.get("SELECT COUNT(*) as count FROM waitlist WHERE created_at >= datetime('now', '-1 day')", (err, row) => {
-        stats.last24h = row ? row.count : 0;
-        resolve();
-      });
-    }),
-    // Domain breakdown (Universities)
-    new Promise((resolve) => {
-      db.all("SELECT SUBSTR(email, INSTR(email, '@') + 1) as domain, COUNT(*) as count FROM waitlist GROUP BY domain ORDER BY count DESC LIMIT 5", (err, rows) => {
-        stats.topUniversities = rows || [];
-        resolve();
-      });
-    }),
-    // Recent activity (Last 5, masked for privacy)
-    new Promise((resolve) => {
-      db.all("SELECT email, created_at, user_type FROM waitlist ORDER BY created_at DESC LIMIT 5", (err, rows) => {
-        stats.recentSignups = (rows || []).map(r => ({
+      }),
+      // Last 24 hours
+      pool.query("SELECT COUNT(*) as count FROM waitlist WHERE created_at >= NOW() - INTERVAL '1 day'").then(res => {
+        stats.last24h = parseInt(res.rows[0].count);
+      }),
+      // Domain breakdown (Universities)
+      pool.query("SELECT SPLIT_PART(email, '@', 2) as domain, COUNT(*) as count FROM waitlist GROUP BY domain ORDER BY count DESC LIMIT 5").then(res => {
+        stats.topUniversities = res.rows.map(r => ({ ...r, count: parseInt(r.count) }));
+      }),
+      // Recent activity
+      pool.query("SELECT email, created_at, user_type FROM waitlist ORDER BY created_at DESC LIMIT 5").then(res => {
+        stats.recentSignups = res.rows.map(r => ({
           maskedEmail: r.email.split('@')[0].substring(0, 3) + '***@' + r.email.split('@')[1],
           time: r.created_at,
           userType: r.user_type
         }));
-        resolve();
-      });
-    })
-  ];
+      })
+    ];
 
-  Promise.all(queries).then(() => {
+    await Promise.all(queries);
     res.json(stats);
-  });
+  } catch (err) {
+    console.error('Metrics error:', err);
+    res.status(500).json({ error: 'Failed to fetch metrics' });
+  }
 });
 
 app.listen(PORT, () => {

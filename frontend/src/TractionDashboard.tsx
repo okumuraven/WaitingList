@@ -38,7 +38,8 @@ export default function TractionDashboard() {
   const [data, setData] = useState<Metrics | null>(null);
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/admin/metrics')
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+    fetch(`${apiBaseUrl}/api/admin/metrics`)
       .then(res => res.json())
       .then(setData)
       .catch(err => console.error("Failed to fetch metrics:", err));
