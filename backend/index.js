@@ -27,17 +27,21 @@ app.use(cors({
 }));
 app.use(bodyParser.json());
 
+const dns = require('dns');
+
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, 
+  port: 587,
+  secure: false, // Use TLS (STARTTLS)
   auth: {
     user: (process.env.EMAIL_USER || '').trim(),
     pass: (process.env.EMAIL_PASS || '').trim(),
   },
-  // Force IPv4 for Render network stability
-  family: 4, 
+  // EXPERT FIX: Force IPv4 via custom DNS lookup
+  lookup: (hostname, options, callback) => {
+    dns.lookup(hostname, { family: 4 }, callback);
+  },
   connectionTimeout: 20000,
   greetingTimeout: 20000,
   socketTimeout: 20000,
