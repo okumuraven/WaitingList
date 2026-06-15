@@ -119,16 +119,32 @@ const sendWelcomeEmail = async (userEmail) => {
 };
 
 // PostgreSQL Database Setup
-const dbConfig = {
-  connectionString: process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/(\?|&)sslmode=[^&]+/, '') : process.env.DATABASE_URL,
-  ssl: { 
-    rejectUnauthorized: false,
-    servername: process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : undefined
-  },
+const { parse } = require('pg-connection-string');
+
+let poolConfig = {
   connectionTimeoutMillis: 15000,
 };
 
-const pool = new Pool(dbConfig);
+if (process.env.DATABASE_URL) {
+  try {
+    const config = parse(process.env.DATABASE_URL);
+    poolConfig = {
+      ...config,
+      ssl: {
+        rejectUnauthorized: false,
+      },
+      connectionTimeoutMillis: 15000,
+    };
+    // Ensure port is a number
+    if (poolConfig.port) poolConfig.port = parseInt(poolConfig.port);
+  } catch (e) {
+    console.error('Connection string parse error, falling back to raw string');
+    poolConfig.connectionString = process.env.DATABASE_URL;
+    poolConfig.ssl = { rejectUnauthorized: false };
+  }
+}
+
+const pool = new Pool(poolConfig);
 
 const initDb = async () => {
   // Add a small delay to allow Render network to stabilize
