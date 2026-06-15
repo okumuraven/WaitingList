@@ -29,12 +29,14 @@ app.use(bodyParser.json());
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465, // Use Port 465 for SSL (often more reliable on Render)
+  port: 465,
   secure: true, 
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  // Force IPv4 to avoid ENETUNREACH on Render
+  family: 4,
   connectionTimeout: 15000,
   greetingTimeout: 15000,
   socketTimeout: 15000,
@@ -43,7 +45,7 @@ const transporter = nodemailer.createTransport({
 // Verify connection configuration
 transporter.verify(function (error, success) {
   if (error) {
-    console.error('SMTP Connection Error:', error);
+    console.error('SMTP Connection Error:', error.message);
   } else {
     console.log('SMTP Server is ready to take our messages');
   }
@@ -121,34 +123,39 @@ const sendWelcomeEmail = async (userEmail) => {
 // PostgreSQL Database Setup
 const { parse } = require('pg-connection-string');
 
-let poolConfig = {
-  connectionTimeoutMillis: 15000,
-};
+let poolConfig = {};
 
 if (process.env.DATABASE_URL) {
-  try {
-    const config = parse(process.env.DATABASE_URL);
-    poolConfig = {
-      ...config,
-      ssl: {
-        rejectUnauthorized: false,
-      },
-      connectionTimeoutMillis: 15000,
-    };
-    // Ensure port is a number
-    if (poolConfig.port) poolConfig.port = parseInt(poolConfig.port);
-  } catch (e) {
-    console.error('Connection string parse error, falling back to raw string');
-    poolConfig.connectionString = process.env.DATABASE_URL;
-    poolConfig.ssl = { rejectUnauthorized: false };
-  }
+  const config = parse(process.env.DATABASE_URL.trim());
+  
+  // MASKED LOGGING FOR DEBUGGING
+  console.log(`Attempting connection to: ${config.host}:${config.port}`);
+  console.log(`User: ${config.user}`);
+  console.log(`Database: ${config.database}`);
+
+  poolConfig = {
+    user: config.user,
+    password: config.password,
+    host: config.host,
+    port: parseInt(config.port || '6543'),
+    database: config.database,
+    ssl: {
+      rejectUnauthorized: false,
+      servername: config.host // MANDATORY for SNI on Shared Pooler
+    },
+    connectionTimeoutMillis: 15000,
+    idleTimeoutMillis: 30000,
+    max: 10
+  };
 }
 
 const pool = new Pool(poolConfig);
 
 const initDb = async () => {
   // Add a small delay to allow Render network to stabilize
+  console.log('Waiting 5s for network stability...');
   await new Promise(resolve => setTimeout(resolve, 5000));
+  
   try {
     const client = await pool.connect();
     console.log('Successfully connected to PostgreSQL.');
@@ -164,6 +171,9 @@ const initDb = async () => {
     console.log('Schema verified.');
   } catch (err) {
     console.error('Database initialization error:', err.message);
+    if (err.message.includes('ENOIDENTIFIER')) {
+      console.log('FIX: Ensure your DATABASE_URL uses the SHARED POOLER (port 6543) and the username is postgres.ldhusuwatonwlvgcgcem');
+    }
   }
 };
 
