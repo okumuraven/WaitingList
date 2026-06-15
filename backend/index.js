@@ -16,12 +16,11 @@ app.use(cors({
   origin: '*'
 }));
 app.use(bodyParser.json());
-
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, 
+  port: 587,
+  secure: false, // Use STARTTLS
   auth: {
     user: (process.env.EMAIL_USER || '').trim(),
     pass: (process.env.EMAIL_PASS || '').trim(),
@@ -38,9 +37,10 @@ const transporter = nodemailer.createTransport({
 // Verify SMTP connection
 transporter.verify(function (error, success) {
   if (error) {
-    console.error('SMTP Connection Error:', error.message);
+    console.error('SMTP VERIFICATION ERROR:', error.message);
+    console.error('FULL ERROR INFO:', error);
   } else {
-    console.log('SMTP Server is ready.');
+    console.log('SMTP Server is ready to send emails.');
   }
 });
 
