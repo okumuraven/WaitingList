@@ -178,14 +178,6 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-// Serve frontend in production
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(path.join(__dirname, '../frontend/dist')));
-  app.get('/:path*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
-  });
-}
-
 // Administrative Metrics API
 app.get('/api/admin/metrics', async (req, res) => {
   try {
@@ -233,6 +225,17 @@ app.get('/api/admin/metrics', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch metrics' });
   }
 });
+
+// Serve frontend in production (Placed after API routes)
+if (process.env.NODE_ENV === 'production') {
+  const frontendPath = path.join(__dirname, '../frontend/dist');
+  app.use(express.static(frontendPath));
+  
+  // Robust catch-all for SPA: handles any unmatched GET requests by serving index.html
+  app.use((req, res) => {
+    res.sendFile(path.join(frontendPath, 'index.html'));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
