@@ -119,11 +119,16 @@ const sendWelcomeEmail = async (userEmail) => {
 };
 
 // PostgreSQL Database Setup
-const pool = new Pool({
+const dbConfig = {
   connectionString: process.env.DATABASE_URL ? process.env.DATABASE_URL.replace(/(\?|&)sslmode=[^&]+/, '') : process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: { 
+    rejectUnauthorized: false,
+    servername: process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).hostname : undefined
+  },
   connectionTimeoutMillis: 15000,
-});
+};
+
+const pool = new Pool(dbConfig);
 
 const initDb = async () => {
   // Add a small delay to allow Render network to stabilize
