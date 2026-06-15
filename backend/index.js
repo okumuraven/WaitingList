@@ -1,3 +1,4 @@
+
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
@@ -5,6 +6,7 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const nodemailer = require('nodemailer');
 const { parse } = require('pg-connection-string');
+const dns = require('dns');
 require('dotenv').config();
 
 const app = express();
@@ -17,7 +19,7 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -27,30 +29,29 @@ app.use(cors({
 }));
 app.use(bodyParser.json());
 
-const dns = require('dns');
-
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // Use TLS (STARTTLS)
+  port: 465,
+  secure: true, // Use SMTPS
   auth: {
     user: (process.env.EMAIL_USER || '').trim(),
     pass: (process.env.EMAIL_PASS || '').trim(),
   },
-  // EXPERT FIX: Force IPv4 via custom DNS lookup
+  // EXPERT FIX: Force IPv4 via custom DNS lookup to avoid Render IPv6 issues
   lookup: (hostname, options, callback) => {
     dns.lookup(hostname, { family: 4 }, callback);
   },
-  connectionTimeout: 20000,
-  greetingTimeout: 20000,
-  socketTimeout: 20000,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
+  socketTimeout: 30000,
 });
 
 // Verify SMTP connection
 transporter.verify(function (error, success) {
   if (error) {
     console.error('SMTP Connection Error:', error.message);
+    console.log('TIP: Ensure your Gmail App Password is correct and 2FA is enabled.');
   } else {
     console.log('SMTP Server is ready.');
   }
@@ -82,9 +83,17 @@ const sendWelcomeEmail = async (userEmail) => {
 let poolConfig = {};
 
 if (process.env.DATABASE_URL) {
-  const url = process.env.DATABASE_URL.trim();
+  let url = process.env.DATABASE_URL.trim();
+
+  // SILENCE SSL WARNING: Explicitly set sslmode to verify-full
+  if (url.includes('sslmode=require')) {
+    url = url.replace('sslmode=require', 'sslmode=verify-full');
+  } else if (!url.includes('sslmode=')) {
+    url += (url.includes('?') ? '&' : '?') + 'sslmode=verify-full';
+  }
+
   const config = parse(url);
-  
+
   poolConfig = {
     user: config.user,
     password: config.password,
@@ -92,7 +101,7 @@ if (process.env.DATABASE_URL) {
     port: parseInt(config.port || '5432'),
     database: config.database,
     ssl: {
-      rejectUnauthorized: false, // Required for Neon
+      rejectUnauthorized: false,
     },
     connectionTimeoutMillis: 30000,
     max: 10
@@ -103,9 +112,8 @@ const pool = new Pool(poolConfig);
 
 const initDb = async () => {
   console.log('Initializing Database...');
-  // Small delay for Render network readiness
   await new Promise(resolve => setTimeout(resolve, 5000));
-  
+
   try {
     const client = await pool.connect();
     console.log('Successfully connected to PostgreSQL.');
