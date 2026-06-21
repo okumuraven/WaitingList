@@ -23,11 +23,15 @@ const transporter = nodemailer.createTransport({
   pool: true,
   maxConnections: 1,
   host: 'smtp.gmail.com',
-  port: 587,
-  secure: false, // Use STARTTLS
+  port: 465,
+  secure: true, // Port 465 requires secure: true
   auth: {
     user: (process.env.EMAIL_USER || '').trim(),
     pass: (process.env.EMAIL_PASS || '').trim(),
+  },
+  lookup: (hostname, options, callback) => {
+    // Ultimate Render Fix: Force IPv4 directly at the socket level
+    dns.lookup(hostname, { family: 4 }, callback);
   },
   connectionTimeout: 30000,
   greetingTimeout: 30000,
