@@ -20,16 +20,14 @@ app.use(cors({
 app.use(bodyParser.json());
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
+  pool: true,
+  maxConnections: 1,
   host: 'smtp.gmail.com',
   port: 587,
   secure: false, // Use STARTTLS
   auth: {
     user: (process.env.EMAIL_USER || '').trim(),
     pass: (process.env.EMAIL_PASS || '').trim(),
-  },
-  // EXPERT FIX: Force IPv4 via custom DNS lookup to avoid Render IPv6 issues
-  lookup: (hostname, options, callback) => {
-    dns.lookup(hostname, { family: 4 }, callback);
   },
   connectionTimeout: 30000,
   greetingTimeout: 30000,

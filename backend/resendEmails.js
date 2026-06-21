@@ -15,16 +15,16 @@ if (!process.env.DATABASE_URL || !process.env.EMAIL_USER || !process.env.EMAIL_P
 
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
+  pool: true, // Use pooled connections for bulk sending
+  maxConnections: 1, // Prevent Google rate limits
+  maxMessages: 100,
   host: 'smtp.gmail.com',
   port: 587,
   secure: false, // Use STARTTLS
   auth: {
     user: process.env.EMAIL_USER.trim(),
     pass: process.env.EMAIL_PASS.trim(),
-  },
-  lookup: (hostname, options, callback) => {
-    dns.lookup(hostname, { family: 4 }, callback);
-  },
+  }
 });
 
 // Database Setup
