@@ -29,13 +29,8 @@ const transporter = nodemailer.createTransport({
     user: (process.env.EMAIL_USER || '').trim(),
     pass: (process.env.EMAIL_PASS || '').trim(),
   },
-  lookup: (hostname, options, callback) => {
-    // Ultimate Render Fix: Bypass Node/OS getaddrinfo completely and force IPv4 A-record query
-    dns.resolve4(hostname, (err, addresses) => {
-      if (err) return callback(err);
-      callback(null, addresses[0], 4);
-    });
-  },
+  localAddress: '0.0.0.0', // Force local IPv4 interface
+  family: 4,               // Force IPv4 resolution directly in net.connect
   connectionTimeout: 30000,
   greetingTimeout: 30000,
   socketTimeout: 30000,
