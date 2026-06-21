@@ -1,54 +1,54 @@
-const express = require('express');
 const { Pool } = require('pg');
-const cors = require('cors');
-const bodyParser = require('body-parser');
-const path = require('path');
 const nodemailer = require('nodemailer');
 const { parse } = require('pg-connection-string');
 const dns = require('dns');
-// FIX: Force Node.js to use IPv4. Render struggles with IPv6 SMTP (ENETUNREACH).
-dns.setDefaultResultOrder('ipv4first');
 require('dotenv').config();
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+// FIX: Force Node.js to use IPv4
+dns.setDefaultResultOrder('ipv4first');
 
-// Middleware - Allow all origins for Vercel/Render compatibility
-app.use(cors({
-  origin: '*'
-}));
-app.use(bodyParser.json());
+// Ensure Environment Variables are set locally
+if (!process.env.DATABASE_URL || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+  console.error("ERROR: Missing DATABASE_URL, EMAIL_USER, or EMAIL_PASS in your local .env file.");
+  process.exit(1);
+}
+
 // Email Transporter Setup
 const transporter = nodemailer.createTransport({
   host: 'smtp.gmail.com',
   port: 587,
   secure: false, // Use STARTTLS
   auth: {
-    user: (process.env.EMAIL_USER || '').trim(),
-    pass: (process.env.EMAIL_PASS || '').trim(),
+    user: process.env.EMAIL_USER.trim(),
+    pass: process.env.EMAIL_PASS.trim(),
   },
-  // EXPERT FIX: Force IPv4 via custom DNS lookup to avoid Render IPv6 issues
   lookup: (hostname, options, callback) => {
     dns.lookup(hostname, { family: 4 }, callback);
   },
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
-  socketTimeout: 30000,
 });
 
-// Verify SMTP connection
-transporter.verify(function (error, success) {
-  if (error) {
-    console.error('SMTP VERIFICATION ERROR:', error.message);
-    console.error('FULL ERROR INFO:', error);
-  } else {
-    console.log('SMTP Server is ready to send emails.');
-  }
-});
+// Database Setup
+let url = process.env.DATABASE_URL.trim();
+if (url.includes('sslmode=require')) {
+  url = url.replace('sslmode=require', 'sslmode=verify-full');
+} else if (!url.includes('sslmode=')) {
+  url += (url.includes('?') ? '&' : '?') + 'sslmode=verify-full';
+}
+const config = parse(url);
+const poolConfig = {
+  user: config.user,
+  password: config.password,
+  host: config.host,
+  port: parseInt(config.port || '5432'),
+  database: config.database,
+  ssl: { rejectUnauthorized: false },
+};
+
+const pool = new Pool(poolConfig);
 
 const sendWelcomeEmail = async (userEmail) => {
   const mailOptions = {
-    from: `"ComradeMarket Kenya" <${(process.env.EMAIL_USER || '').trim()}>`,
+    from: `"ComradeMarket Kenya" <${process.env.EMAIL_USER.trim()}>`,
     to: userEmail.trim(),
     subject: 'You\'re In! Welcome to the New Student Economy 🇰🇪',
     text: `You're In! Welcome to ComradeMarket Kenya!\n\nYou've just secured your spot on the waitlist for Kenya's most advanced student ecosystem. We're building the infrastructure for your hustle.\n\n© 2026 The Comrade Market Bureau`,
@@ -99,115 +99,47 @@ const sendWelcomeEmail = async (userEmail) => {
       </div>
     `,
     headers: {
-      'List-Unsubscribe': `<mailto:${(process.env.EMAIL_USER || '').trim()}?subject=unsubscribe>`,
+      'List-Unsubscribe': `<mailto:${process.env.EMAIL_USER.trim()}?subject=unsubscribe>`,
       'X-Entity-Ref-ID': Date.now().toString()
     }
   };
 
   try {
-    const info = await transporter.sendMail(mailOptions);
-    console.log(`SUCCESS: Email sent to ${userEmail}. ID: ${info.messageId}`);
+    await transporter.sendMail(mailOptions);
+    console.log(`✅ SUCCESS: Resent email to ${userEmail}`);
   } catch (error) {
-    console.error('EMAIL FAILURE:', error.message);
+    console.error(`❌ FAILURE: Could not send to ${userEmail}:`, error.message);
   }
 };
 
-// Database Setup (Neon)
-let poolConfig = {};
-if (process.env.DATABASE_URL) {
-  let url = process.env.DATABASE_URL.trim();
-  if (url.includes('sslmode=require')) {
-    url = url.replace('sslmode=require', 'sslmode=verify-full');
-  } else if (!url.includes('sslmode=')) {
-    url += (url.includes('?') ? '&' : '?') + 'sslmode=verify-full';
-  }
-  const config = parse(url);
-  poolConfig = {
-    user: config.user,
-    password: config.password,
-    host: config.host,
-    port: parseInt(config.port || '5432'),
-    database: config.database,
-    ssl: { rejectUnauthorized: false },
-    connectionTimeoutMillis: 30000,
-    max: 10
-  };
-}
-
-const pool = new Pool(poolConfig);
-
-const initDb = async () => {
-  console.log('Initializing Database...');
-  await new Promise(resolve => setTimeout(resolve, 5000));
+const resendToAll = async () => {
+  console.log("Connecting to Database...");
   try {
     const client = await pool.connect();
-    console.log('Successfully connected to PostgreSQL.');
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS waitlist (
-        id SERIAL PRIMARY KEY,
-        email TEXT UNIQUE NOT NULL,
-        user_type TEXT DEFAULT 'Buyer',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
+    const result = await client.query('SELECT email FROM waitlist');
     client.release();
-    console.log('Schema verified.');
+
+    const emails = result.rows.map(row => row.email);
+    console.log(`Found ${emails.length} users in the database.`);
+    
+    if (emails.length === 0) {
+      console.log("No emails found to resend to.");
+      process.exit(0);
+    }
+
+    console.log("Starting bulk resend...\n");
+    for (const email of emails) {
+      await sendWelcomeEmail(email);
+      // Wait 1 second between emails to prevent Google rate-limits
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    console.log("\n🎉 All emails have been resent!");
+    process.exit(0);
   } catch (err) {
-    console.error('Database Connection Error:', err.message);
+    console.error("Database Error:", err);
+    process.exit(1);
   }
 };
 
-initDb();
-
-// API Routes
-app.post('/api/join', async (req, res) => {
-  const { email, userType } = req.body;
-  if (!email || !email.includes('@')) {
-    return res.status(400).json({ error: 'Valid email is required.' });
-  }
-
-  const query = `INSERT INTO waitlist (email, user_type) VALUES ($1, $2) RETURNING id`;
-  try {
-    const result = await pool.query(query, [email, userType || 'Buyer']);
-    // Send email for new signups
-    sendWelcomeEmail(email);
-    res.status(201).json({ message: 'Successfully joined!', id: result.rows[0].id });
-  } catch (err) {
-    if (err.code === '23505') {
-      // EVEN IF THEY EXIST, let's send them the welcome email again so the user can verify it works
-      sendWelcomeEmail(email);
-      return res.status(200).json({ message: 'Already on the list! Resending your welcome email.', alreadyExists: true });
-    }
-    console.error('Insert Error:', err);
-    res.status(500).json({ error: 'Internal server error.' });
-  }
-});
-
-app.get('/health', (req, res) => res.status(200).send('OK'));
-
-// Administrative Metrics API
-app.get('/api/admin/metrics', async (req, res) => {
-  try {
-    const stats = { total: 0, last24h: 0, topUniversities: [], recentSignups: [], segments: {} };
-    const queries = [
-      pool.query("SELECT COUNT(*) as count FROM waitlist").then(res => stats.total = parseInt(res.rows[0].count)),
-      pool.query("SELECT user_type, COUNT(*) as count FROM waitlist GROUP BY user_type").then(res => {
-        res.rows.forEach(r => stats.segments[r.user_type] = parseInt(r.count));
-      }),
-      pool.query("SELECT COUNT(*) as count FROM waitlist WHERE created_at >= NOW() - INTERVAL '1 day'").then(res => stats.last24h = parseInt(res.rows[0].count))
-    ];
-    await Promise.all(queries);
-    res.json(stats);
-  } catch (err) {
-    console.error('Metrics Error:', err);
-    res.status(500).json({ error: 'Failed to fetch metrics' });
-  }
-});
-
-app.get('/', (req, res) => {
-  res.send('ComradeMarket Backend API is running.');
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+resendToAll();
